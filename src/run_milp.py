@@ -9,6 +9,7 @@ from .edf_drr import schedule_edf_drr
 from .fifo import calculate_metrics, schedule_fifo
 from .gen_td26 import load_gen_td26_requests
 from .milp import solve_milp
+from .predictive_edf_drr import schedule_predictive_edf_drr
 from .traffic import generate_requests
 
 
@@ -49,6 +50,7 @@ def main() -> None:
         "EDF": schedule_edf(requests),
         "DRR": schedule_drr(requests),
         "EDF+DRR": schedule_edf_drr(requests),
+        "Predictive EDF+DRR": schedule_predictive_edf_drr(requests),
         "MILP": solve_milp(requests),
     }
     output = {

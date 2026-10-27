@@ -11,6 +11,10 @@ from src.gen_td26 import load_gen_td26_requests
 from src.models import REQUEST_FIELDS, Request
 from src.milp import solve_milp
 from src.parallel import schedule_parallel
+from src.predictive_edf_drr import (
+    predict_traffic_and_adjust_quanta,
+    schedule_predictive_edf_drr,
+)
 from src.traffic import generate_requests
 
 
@@ -86,6 +90,20 @@ class FifoBaselineTests(unittest.TestCase):
         scheduled = schedule_parallel(requests, "EDF", workers=1)
         self.assertEqual(scheduled[0].request.request_id, 2)
 
+    def test_parallel_predictive_hybrid_schedules_all_requests(self) -> None:
+        requests = [
+            Request(1, "VIP", 0.0, 0.5, 50.0, 10.0, 10.0),
+            Request(2, "Free", 0.0, 0.2, 50.0, 10.0, 1.0),
+            Request(3, "Premium", 0.1, 0.3, 50.0, 10.0, 4.0),
+        ]
+        scheduled = schedule_parallel(
+            requests, "Predictive EDF+DRR", workers=2
+        )
+        self.assertEqual(
+            {item.request.request_id for item in scheduled},
+            {request.request_id for request in requests},
+        )
+
     def test_static_policies_schedule_the_same_request_set(self) -> None:
         requests = generate_requests(count=40, seed=2026, arrival_rate=20.0)
         schedules = {
@@ -100,6 +118,28 @@ class FifoBaselineTests(unittest.TestCase):
             self.assertEqual(len(actual_ids), len(expected_ids), policy)
             self.assertEqual(set(actual_ids), expected_ids, policy)
             self.assertEqual(len(actual_ids), len(set(actual_ids)), policy)
+
+    def test_predictive_edf_drr_schedules_the_same_request_set(self) -> None:
+        requests = generate_requests(count=40, seed=2026, arrival_rate=20.0)
+        scheduled = schedule_predictive_edf_drr(requests)
+        self.assertEqual(
+            {item.request.request_id for item in scheduled},
+            {request.request_id for request in requests},
+        )
+        self.assertEqual(
+            len(scheduled),
+            len({item.request.request_id for item in scheduled}),
+        )
+
+    def test_predictive_quanta_preserve_floor_and_follow_demand(self) -> None:
+        base = {"VIP": 1.0, "Premium": 1.0, "Free": 1.0}
+        requests = [
+            Request(1, "VIP", 0.0, 3.0, 1.0, 10.0, 1.0),
+            Request(2, "Free", 0.0, 1.0, 1.0, 10.0, 1.0),
+        ]
+        adjusted = predict_traffic_and_adjust_quanta(requests, base)
+        self.assertGreater(adjusted["VIP"], adjusted["Free"])
+        self.assertGreaterEqual(adjusted["Premium"], 0.5)
 
     def test_gen_td26_loader_augments_request_fields(self) -> None:
         csv_text = (

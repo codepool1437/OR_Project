@@ -72,7 +72,7 @@ The synthetic generator remains the default and is used for controlled stress
 tests. GenTD26 is used for the real-workload evaluation. The final report
 should present both results separately and cite the GenTD26 SoCC'25 paper.
 
-## Compare FIFO, EDF, DRR, and EDF+DRR
+## Compare FIFO, EDF, DRR, EDF+DRR, and predictive EDF+DRR
 
 All four schedulers can be evaluated on the exact same workload:
 
@@ -131,6 +131,12 @@ EDF+DRR combines the policies: DRR selects the next tier, then EDF selects the
 earliest-deadline request within that tier. This prevents one busy tier from
 monopolizing the server while still prioritizing urgent requests within each
 tier.
+
+Predictive EDF+DRR uses the same tier and deadline rules, but adjusts each
+round's DRR quantum from the pending service demand. It is included in the
+single-worker comparison, parallel-worker comparison, capacity report, and
+MILP benchmark commands as a deterministic proxy for ML-based traffic
+adaptation; it does not change the non-preemptive service model.
 
 ## MILP theoretical benchmark
 

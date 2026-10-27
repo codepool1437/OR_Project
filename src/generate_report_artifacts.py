@@ -8,7 +8,7 @@ from .fifo import calculate_metrics
 from .gen_td26 import load_gen_td26_requests
 from .parallel import schedule_parallel
 
-POLICIES = ("FIFO", "EDF", "DRR", "EDF+DRR")
+POLICIES = ("FIFO", "EDF", "DRR", "EDF+DRR", "Predictive EDF+DRR")
 WORKERS = (1, 2, 4, 8, 16, 32)
 
 
@@ -26,7 +26,7 @@ def _write_summary(rows: list[dict[str, str]], path: Path, horizon: float) -> No
         "",
         f"- Horizon: `{horizon:.0f}` seconds",
         f"- Offered requests: `{rows[0]['offered']}`",
-        "- Policies: FIFO, EDF, DRR, EDF+DRR",
+        "- Policies: FIFO, EDF, DRR, EDF+DRR, Predictive EDF+DRR",
         "- Worker capacities: 1, 2, 4, 8, 16, 32",
         "",
         "| Workers | Policy | Completed | Backlog | Avg wait (s) | P95 wait (s) | SLA violation rate | Fairness |",

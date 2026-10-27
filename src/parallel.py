@@ -6,6 +6,7 @@ from typing import Iterable, Mapping
 
 from .drr import DEFAULT_QUANTA
 from .models import Request, ScheduledRequest
+from .predictive_edf_drr import predict_traffic_and_adjust_quanta
 
 
 def schedule_parallel(
@@ -16,13 +17,15 @@ def schedule_parallel(
 ) -> list[ScheduledRequest]:
     """Schedule requests on a pool of identical non-preemptive workers.
 
-    ``policy`` is one of ``FIFO``, ``EDF``, ``DRR``, or ``EDF+DRR``. A worker
-    dispatches the next available request whenever it becomes free. DRR chooses
-    the tier and EDF+DRR chooses the request deadline within the selected tier.
+    ``policy`` is one of ``FIFO``, ``EDF``, ``DRR``, ``EDF+DRR``, or
+    ``Predictive EDF+DRR``. A worker dispatches the next available request
+    whenever it becomes free. DRR chooses the tier and hybrid policies choose
+    the request deadline within the selected tier.
     """
     if workers < 1:
         raise ValueError("workers must be at least 1")
-    if policy not in {"FIFO", "EDF", "DRR", "EDF+DRR"}:
+    supported_policies = {"FIFO", "EDF", "DRR", "EDF+DRR", "Predictive EDF+DRR"}
+    if policy not in supported_policies:
         raise ValueError(f"unsupported policy: {policy}")
 
     ordered = sorted(requests, key=lambda item: (item.arrival_time, item.request_id))
@@ -30,7 +33,7 @@ def schedule_parallel(
         return []
     tier_order = list((DEFAULT_QUANTA if quanta is None else quanta).keys())
     configured_quanta = dict(DEFAULT_QUANTA if quanta is None else quanta)
-    if policy in {"DRR", "EDF+DRR"}:
+    if policy in {"DRR", "EDF+DRR", "Predictive EDF+DRR"}:
         observed = {request.tier for request in ordered}
         missing = observed - configured_quanta.keys()
         if missing:
@@ -56,7 +59,7 @@ def schedule_parallel(
             request = ordered[next_index]
             if policy == "DRR":
                 tier_queues[request.tier].append(request)
-            elif policy == "EDF+DRR":
+            elif policy in {"EDF+DRR", "Predictive EDF+DRR"}:
                 heapq.heappush(
                     tier_heaps[request.tier],
                     (request.deadline, request.arrival_time, request.request_id, request),
@@ -83,9 +86,7 @@ def schedule_parallel(
             )
             return ready.pop(index)
 
-        queues_are_ready = (
-            tier_queues if policy == "DRR" else tier_heaps
-        )
+        queues_are_ready = tier_queues if policy == "DRR" else tier_heaps
         if not any(queues_are_ready.values()):
             return None
         for offset in range(len(tier_order)):
@@ -93,7 +94,18 @@ def schedule_parallel(
             tier = tier_order[index]
             if queues_are_ready[tier]:
                 cursor = (index + 1) % len(tier_order)
-                deficits[tier] += configured_quanta[tier]
+                if policy == "Predictive EDF+DRR":
+                    pending = [
+                        request
+                        for queue in tier_heaps.values()
+                        for _, _, _, request in queue
+                    ]
+                    dynamic_quanta = predict_traffic_and_adjust_quanta(
+                        pending, configured_quanta
+                    )
+                    deficits[tier] += dynamic_quanta[tier]
+                else:
+                    deficits[tier] += configured_quanta[tier]
                 if policy == "DRR":
                     request = tier_queues[tier].popleft()
                 else:

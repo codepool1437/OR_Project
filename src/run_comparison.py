@@ -8,6 +8,7 @@ from .edf import schedule_edf
 from .edf_drr import schedule_edf_drr
 from .fifo import calculate_metrics, schedule_fifo
 from .parallel import schedule_parallel
+from .predictive_edf_drr import schedule_predictive_edf_drr
 from .gen_td26 import load_gen_td26_requests
 from .traffic import generate_requests
 
@@ -57,11 +58,18 @@ def main() -> None:
             "EDF": schedule_edf(requests),
             "DRR": schedule_drr(requests),
             "EDF+DRR": schedule_edf_drr(requests),
+            "Predictive EDF+DRR": schedule_predictive_edf_drr(requests),
         }
     else:
         schedules = {
             policy: schedule_parallel(requests, policy, args.workers)
-            for policy in ("FIFO", "EDF", "DRR", "EDF+DRR")
+            for policy in (
+                "FIFO",
+                "EDF",
+                "DRR",
+                "EDF+DRR",
+                "Predictive EDF+DRR",
+            )
         }
     results = {
         name: calculate_metrics(
