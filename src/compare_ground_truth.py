@@ -82,10 +82,13 @@ def write_report(rows: list[dict[str, object]], output: Path) -> None:
         "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for row in rows:
-        lines.append(
-            f"| {row['policy']} | {row['weighted_tardiness']:.6f} | "
-            f"{row['objective_gap_percent']:.2f}% | " if row["objective_gap_percent"] is not None
+        gap_str = (
+            f"{row['objective_gap_percent']:.2f}% | "
+            if row["objective_gap_percent"] is not None
             else "N/A | "
+        )
+        lines.append(
+            f"| {row['policy']} | {row['weighted_tardiness']:.6f} | {gap_str}"
         )
         lines[-1] += (
             f"{row['average_waiting_time']:.6f} | "

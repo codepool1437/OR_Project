@@ -1,6 +1,11 @@
 # AI-Predictive API Gateway Scheduler
 
-This repository contains the first project milestone: a reproducible synthetic workload and FIFO scheduling baseline.
+This repository contains a complete reproducible scheduling research platform:
+synthetic and GenTD26 workloads, FIFO, EDF, DRR, static EDF+DRR, and
+predictive/dynamic EDF+DRR schedulers, plus an offline MILP benchmark for
+small-batch ground truth. Results support an IEEE research paper comparing all
+policies across capacity sweeps, finite horizons, and paired multi-seed
+evaluations.
 
 The frozen research question, hypotheses, assumptions, scope, and evaluation
 metrics are recorded in [`docs/research_design.md`](docs/research_design.md).
@@ -74,7 +79,7 @@ should present both results separately and cite the GenTD26 SoCC'25 paper.
 
 ## Compare FIFO, EDF, DRR, EDF+DRR, and predictive EDF+DRR
 
-All four schedulers can be evaluated on the exact same workload:
+All five schedulers can be evaluated on the exact same workload:
 
 ```text
 python -m src.run_comparison --requests 1000 --seed 42

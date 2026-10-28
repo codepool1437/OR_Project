@@ -4,9 +4,12 @@ import argparse
 import csv
 from pathlib import Path
 
-from .fifo import calculate_metrics
+from .edf_drr import schedule_edf_drr
+from .fifo import calculate_metrics, schedule_fifo
 from .gen_td26 import load_gen_td26_requests
 from .parallel import schedule_parallel
+from .predictive_edf_drr import schedule_predictive_edf_drr
+from .traffic_model import TrafficSpikeModel, train_traffic_model
 
 POLICIES = ("FIFO", "EDF", "DRR", "EDF+DRR", "Predictive EDF+DRR")
 WORKERS = (1, 2, 4, 8, 16, 32)
@@ -81,12 +84,18 @@ def _write_plots(rows: list[dict[str, str]], output_dir: Path) -> None:
         plt.close(figure)
 
 
-def generate(dataset: Path, output_dir: Path, horizon: float) -> None:
+def generate(dataset: Path, output_dir: Path, horizon: float, use_model: bool = False) -> None:
     requests = load_gen_td26_requests(dataset)
+    model = train_traffic_model(requests, window_size=1.0) if use_model else None
     rows: list[dict[str, str]] = []
     for workers in WORKERS:
         for policy in POLICIES:
-            schedule = schedule_parallel(requests, policy, workers)
+            if policy == "Predictive EDF+DRR":
+                schedule = schedule_parallel(
+                    requests, policy, workers, model=model
+                )
+            else:
+                schedule = schedule_parallel(requests, policy, workers)
             metrics = calculate_metrics(
                 requests,
                 schedule,
@@ -123,8 +132,13 @@ def main() -> None:
     parser.add_argument("--dataset", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, default=Path("results"))
     parser.add_argument("--horizon", type=float, default=1_750_000.0)
+    parser.add_argument(
+        "--use-model",
+        action="store_true",
+        help="train and use the traffic model for Predictive EDF+DRR (slow on sparse traces)",
+    )
     args = parser.parse_args()
-    generate(args.dataset, args.output_dir, args.horizon)
+    generate(args.dataset, args.output_dir, args.horizon, use_model=args.use_model)
     print(f"Generated report artifacts in {args.output_dir}")
 
 

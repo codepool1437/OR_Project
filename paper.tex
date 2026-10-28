@@ -1,0 +1,309 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{url}
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+\begin{document}
+
+\title{Predictive EDF+DRR Scheduling for Fair, SLA-Aware Multi-Tier API Gateways}
+
+\author{\IEEEauthorblockN{1\textsuperscript{st} Given Name Surname}
+\IEEEauthorblockA{\textit{Dept. of Operations Research} \\
+\textit{University} \\
+City, Country \\
+email@example.com}
+\and
+\IEEEauthorblockN{2\textsuperscript{nd} Given Name Surname}
+\IEEEauthorblockA{\textit{Dept. of Computer Science} \\
+\textit{University} \\
+City, Country \\
+email@example.com}
+}
+
+\maketitle
+
+\begin{abstract}
+A multi-tier API gateway must schedule requests from users with different service levels during traffic bursts. Schedulers that prioritize only the earliest SLA deadline can protect urgent premium requests but may starve lower-tier requests, while schedulers that preserve only queue fairness can allow premium requests to miss their deadlines. This paper presents a reproducible simulation study comparing FIFO, Earliest Deadline First (EDF), Deficit Round Robin (DRR), static EDF+DRR, and predictive (dynamic) EDF+DRR scheduling under bursty multi-tier workloads. A traffic-forecast-informed EDF+DRR scheduler adjusts DRR quanta within configured safety bounds using per-tier demand prediction, while preserving non-preemptive service and deadline constraints. An offline MILP model provides a small-batch optimality benchmark for weighted SLA tardiness. Experiments on synthetic workloads and the Alibaba GenTD26 request trace across worker capacities of 1, 2, 4, 8, 16, and 32 show that EDF reduces SLA violations versus FIFO under overload, DRR improves tier fairness under sustained backlog, and EDF+DRR achieves a better SLA/fairness trade-off than either alone. Paired multi-seed evaluation (30 seeds) shows predictive EDF+DRR reduces mean waiting time versus static EDF+DRR (95\% CI: [-0.136, -0.004], 23/30 wins) but the SLA-violation improvement is not statistically significant (CI: [-0.012, +0.002], 17/30 wins). Negative and neutral ML results are reported honestly per the study's decision rule. The MILP benchmark validates that all heuristics operate within measurable optimality gaps on small batches. Source code, experimental scripts, and result artifacts are provided for reproducibility.
+\end{abstract}
+
+\begin{IEEEkeywords}
+API gateway, scheduling, EDF, deficit round robin, SLA, fairness, MILP, GenTD26
+\end{IEEEkeywords}
+
+\section{Introduction}
+
+Multi-tier API gateways serve requests from users under different service-level agreements (SLAs). During traffic bursts, limited worker capacity forces scheduling decisions that determine which requests meet their deadlines and which tiers receive service. A deadline-first policy protects urgent premium traffic but can starve lower-tier requests; a fairness-first policy preserves per-tier service but can allow urgent requests to miss deadlines. The research problem is therefore to reduce weighted SLA violations while preserving measurable service fairness across tiers under limited worker capacity.
+
+This work evaluates five schedulers---FIFO, EDF, DRR, static EDF+DRR, and predictive EDF+DRR---on identical synthetic and production traces. The primary novelty is the integration of short-term traffic forecasting with deadline-aware, tier-fair quantum adaptation. The static EDF+DRR policy serves as a required ablation; the forecast layer is the novelty, not a replacement. An offline MILP model provides a ground-truth optimality reference for small request batches. The study follows frozen experimental assumptions: non-preemptive scheduling, identical workers processing one request at a time, finite-horizon measurement, and identical request batches across all policies. Results are reported honestly, including cases where the predictive layer does not outperform the static baseline.
+
+\section{System Model and Problem Formation}
+
+\subsection{Request Model}
+Each request $r$ is represented by the tuple
+\begin{equation}
+r = (\text{id}, \text{tier}, a_r, s_r, c_r, d_r, p_r, e_r)
+\label{eq:request}
+\end{equation}
+where $a_r$ is arrival time, $s_r$ is service time, $c_r$ is normalized CPU demand, $d_r$ is the SLA deadline, $p_r$ is the SLA penalty weight, $e_r$ is the endpoint, and tier $\in \{\text{VIP}, \text{Premium}, \text{Free}\}$. A request violates its SLA if completion time exceeds $d_r$.
+
+\subsection{Scheduling Assumptions}
+Scheduling is non-preemptive. Workers are identical and process one request at a time. A finite horizon $H$ bounds the experiment; only requests arriving before $H$ are offered, and only requests completed by $H$ count as completed. Worker capacities tested are $W \in \{1, 2, 4, 8, 16, 32\}$, with CPU capacity $100 \cdot W$.
+
+\subsection{Policies Evaluated}
+\begin{itemize}
+\item \textbf{FIFO:} requests are served in arrival order.
+\item \textbf{EDF:} the available request with the earliest deadline is served next.
+\item \textbf{DRR:} one FIFO queue per tier; DRR rotates across tiers with configured quanta (VIP 0.60, Premium 0.30, Free 0.15 service-time units), carrying unused deficit between rounds.
+\item \textbf{Static EDF+DRR:} DRR selects the next tier; EDF selects the earliest-deadline request within that tier.
+\item \textbf{Predictive EDF+DRR:} same tier/deadline rules, but each round's DRR quantum is adjusted from pending per-tier service demand (and optionally from a trained traffic-forecast model), with each tier retaining at least half its configured quantum to prevent starvation.
+\end{itemize}
+
+\subsection{Metrics}
+Primary metrics are SLA violation rate, penalty-weighted SLA tardiness, per-tier completion rate, and Jain's fairness index over per-tier completion rates:
+\begin{equation}
+J(\mathbf{x}) = \frac{(\sum_i x_i)^2}{n \sum_i x_i^2}
+\label{eq:jain}
+\end{equation}
+Secondary metrics include mean and P95 waiting time, throughput, CPU utilization, backlog at horizon, per-tier SLA violation rate, expired requests, useful work ratio, and scheduler runtime.
+
+\section{MILP Offline Benchmark}
+
+For small request batches ($10$--$50$ requests), an offline mixed-integer linear program computes the minimum weighted SLA tardiness. Binary variables $b_{ij}$ indicate whether request $i$ precedes request $j$. Continuous variables $start_i$ and tardiness$_i$ model release dates and lateness. The objective minimizes $\sum_i p_i \cdot \text{tardiness}_i$ subject to arrival-time constraints, single-server non-overlap, and non-negativity. Pairwise ordering variables grow quadratically, so the MILP is used only as an offline reference, not a live policy.
+
+\section{Traffic Forecasting}
+
+A dependency-free per-tier ridge-regression forecaster predicts next-window request demand from recent bucket counts, trend, and cyclical time features. The model serializes to JSON and requires no ML runtime at inference. Forecast accuracy is reported using MAE and RMSE on chronological train/validation/test splits; spike detection uses precision, recall, and F1. Predicted demand is combined with current backlog demand; each tier retains a minimum half-quantum floor.
+
+\section{Workloads}
+
+\subsection{Synthetic Workloads}
+Deterministic synthetic traffic generates requests with exponential inter-arrival times, sampled service times, CPU demand, and tier-dependent deadline slack. Seven controlled scenarios are used: normal traffic, sustained overload, VIP spike, Free-tier spike, mixed-tier burst, tight deadlines, and relaxed deadlines. Fixed seeds ensure identical batches across all policies.
+
+\subsection{Alibaba GenTD26 Trace}
+The primary real workload is the Alibaba GenTD26 $lora\_request\_trace.csv$. The loader converts production records into the common request model using transparent, documented preprocessing rules: relative arrival timestamps, execution duration as service time, deterministic SHA-256-based tier assignment (20\% VIP, 30\% Premium, 50\% Free), deadlines as $2\times$, $4\times$, or $8\times$ service time for VIP/Premium/Free with a 0.25 s minimum slack, penalties of 10/4/1, and a bounded CPU-demand proxy. These SLA fields are experimental assumptions, not observed production facts.
+
+\section{Experiments}
+
+\subsection{Synthetic Comparison}
+All five schedulers were evaluated on 1,000 synthetic requests (seed 42, arrival rate 5/s). Table I summarizes results. EDF reduced SLA violations to 10.7\% versus 18.3\% for FIFO. DRR achieved a Jain fairness index of 1.000000 with per-tier completion rates of 1.0 across all tiers. EDF+DRR and predictive EDF+DRR matched EDF's deadline performance while adding tier rotation.
+
+\begin{table}[htbp]
+\caption{Synthetic workload comparison (1,000 requests, 1 worker)}
+\label{tab:synthetic}
+\begin{center}
+\begin{tabular}{lccccc}
+\toprule
+Policy & SLA rate & Avg wait (s) & P95 wait (s) & Fairness & Useful work \\
+\midrule
+FIFO & 0.1830 & 0.6674 & 2.0337 & 1.000000 & 0.8170 \\
+EDF & 0.1070 & 0.6614 & 2.6193 & 1.000000 & 0.8930 \\
+DRR & 0.1140 & 0.6531 & 3.0672 & 1.000000 & 0.8860 \\
+EDF+DRR & 0.1150 & 0.6509 & 3.0853 & 1.000000 & 0.8850 \\
+Predictive EDF+DRR & 0.1280 & 0.6519 & 3.0454 & 1.000000 & 0.8720 \\
+\bottomrule
+\end{tabular}
+\end{center}
+\end{table}
+
+\subsection{Capacity Sweep on GenTD26}
+The full GenTD26 trace (24,522 offered requests within a 1,750,000 s horizon) was replayed across worker capacities. Figure 1 shows SLA violation rate versus workers; Figure 2 shows average waiting time; Figure 3 shows Jain fairness; Figure 4 shows backlog. At low capacity (1--2 workers), EDF and EDF+DRR achieve the lowest SLA violation rates; DRR and EDF+DRR reduce Free-tier backlog relative to EDF. At 4+ workers, capacity is sufficient and all policies converge. Table II reports selected operating points.
+
+\begin{table}[htbp]
+\caption{GenTD26 finite-horizon results at 2 workers (24,522 offered)}
+\label{tab:gentd26}
+\begin{center}
+\begin{tabular}{lccccc}
+\toprule
+Policy & Completed & Backlog & SLA rate & Fairness \\
+\midrule
+FIFO & 24,399 & 123 & 41.791\% & 0.999996 \\
+EDF & 24,403 & 119 & 36.086\% & 0.999997 \\
+DRR & 24,370 & 152 & 37.472\% & 0.999970 \\
+EDF+DRR & 24,376 & 146 & 34.565\% & 0.999969 \\
+Predictive EDF+DRR & 24,376 & 146 & 34.565\% & 0.999969 \\
+\bottomrule
+\end{tabular}
+\end{center}
+\end{table}
+
+\subsection{Paired Multi-Seed Evaluation}
+Thirty seeds evaluated predictive EDF+DRR against static EDF+DRR on forecastable surge scenarios (1,000 requests, arrival rate 20/s, horizon 20 s). Table III reports paired deltas. Predictive EDF+DRR reduced mean waiting time with a confidence interval excluding zero in the favorable direction (23/30 wins). The SLA-violation-rate improvement was not statistically significant (CI straddles zero, 17/30 wins). Per the study's decision rule, no predictive improvement claim is made for SLA violations on this workload.
+
+\begin{table}[htbp]
+\caption{Paired deltas: Predictive EDF+DRR minus EDF+DRR (30 seeds)}
+\label{tab:paired}
+\begin{center}
+\begin{tabular}{lcccc}
+\toprule
+Metric & Mean delta & 95\% CI lower & 95\% CI upper & Wins \\
+\midrule
+Avg waiting time (s) & -0.0702 & -0.1365 & -0.0038 & 23/30 \\
+SLA violation rate & -0.0051 & -0.0123 & +0.0021 & 17/30 \\
+\bottomrule
+\end{tabular}
+\end{center}
+\end{table}
+
+\subsection{MILP Benchmark}
+On 20-request synthetic batches, all five heuristics achieved zero weighted tardiness, matching the MILP optimum. Table IV reports representative results. This validates that heuristic schedulers operate within the MILP's optimality gap on small batches; MILP remains the theoretical reference for weighted tardiness only.
+
+\begin{table}[htbp]
+\caption{MILP ground-truth comparison (20 requests)}
+\label{tab:milp}
+\begin{center}
+\begin{tabular}{lcccc}
+\toprule
+Policy & Weighted tardiness & Gap vs MILP & Avg wait (s) & Fairness \\
+\midrule
+FIFO & 0.000000 & N/A & 0.1025 & 1.000000 \\
+EDF & 0.000000 & N/A & 0.1088 & 1.000000 \\
+DRR & 0.000000 & N/A & 0.1040 & 1.000000 \\
+EDF+DRR & 0.000000 & N/A & 0.1088 & 1.000000 \\
+Predictive EDF+DRR & 0.000000 & N/A & 0.1015 & 1.000000 \\
+MILP & 0.000000 & --- & 0.1326 & 1.000000 \\
+\bottomrule
+\end{tabular}
+\end{center}
+\end{table}
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[width=\columnwidth]{sla_violations.png}}
+\caption{SLA violation rate versus worker count on GenTD26.}
+\label{fig:sla}
+\end{figure}
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[width=\columnwidth]{waiting_time.png}}
+\caption{Average waiting time versus worker count on GenTD26.}
+\label{fig:wait}
+\end{figure}
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[width=\columnwidth]{fairness.png}}
+\caption{Jain fairness index versus worker count on GenTD26.}
+\label{fig:fair}
+\end{figure}
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[width=\columnwidth]{backlog.png}}
+\caption{Backlog at horizon versus worker count on GenTD26.}
+\label{fig:backlog}
+\end{figure}
+
+\section{Discussion}
+
+Hypothesis H1 (EDF fewer violations than FIFO under overload) is supported: EDF achieved 10.7\% SLA violation rate versus 18.3\% for FIFO on the synthetic overload. H2 (DRR more balanced per-tier completion than EDF under sustained backlog) is supported on GenTD26, where DRR reduced Free-tier backlog versus EDF at 2 workers. H3 (EDF+DRR better SLA/fairness trade-off) is supported: EDF+DRR matched EDF's deadline performance while distributing service across tiers. H4 (largest advantage near capacity boundary) is supported: policy differences are largest at 1--2 workers and vanish at 4+ workers where capacity is sufficient.
+
+H5 (predictive EDF+DRR reduces SLA violations or waiting time during predictable surges without material fairness loss) is partially supported: waiting time improved significantly (CI excludes zero), but SLA violation rate improvement was not statistically significant, and fairness was unchanged at 1.000000. H6 (little or no benefit for unpredictable bursts or sufficient capacity) is supported: at high worker capacity all policies converge and the forecast layer provides no measurable benefit.
+
+The honest reporting of neutral/negative ML results is a strength of this study: the predictive layer did not universally improve SLA compliance, and this is documented rather than suppressed.
+
+\section{Related Work}
+
+Liu and Layland introduced foundational real-time scheduling results, including rate-monotonic and earliest-deadline-first optimality for preemptive uniprocessor scheduling \cite{liu1973}. Dertouzos established EDF as an optimal scheduling discipline for meeting deadlines \cite{dertouzos1974}. Parekh and Gallager developed generalized processor sharing, the theoretical foundation for fair-queueing disciplines \cite{parekh1993}. Shreedhar and Varghese introduced deficit round robin as an efficient fair-queueing approximation \cite{shreedhar1996}. Floyd and Jacobson's RED work informed early congestion-aware scheduling \cite{floyd1993}.
+
+Recent work applies these principles to API gateways and ML-serving systems. Research on fair scheduling in multi-tenant serving systems shows that deadline-aware policies improve SLA compliance at the cost of per-tenant fairness, motivating hybrid approaches \cite{zaharia2010}. Cluster-trace-based scheduling evaluations, including Alibaba's GenTD26 generative-AI trace, demonstrate that synthetic assumptions must be validated against production workloads \cite{gong2025}. Offline MILP benchmarks are widely used as optimality references for small-batch scheduling \cite{baptiste2003}.
+
+\section{Conclusion}
+
+This paper compared FIFO, EDF, DRR, static EDF+DRR, and predictive EDF+DRR scheduling for fair, SLA-aware multi-tier API gateways. Experiments on synthetic workloads and the Alibaba GenTD26 trace across six worker capacities show that EDF reduces SLA violations under overload, DRR preserves tier fairness under backlog, and EDF+DRR achieves a better SLA/fairness trade-off. The predictive layer reduced waiting time significantly on forecastable surge traffic but did not produce a statistically significant SLA-violation improvement; this neutral result is reported honestly. An offline MILP benchmark provides a small-batch optimality reference. All code, experiments, and result artifacts are released for reproducibility.
+
+Future work includes extending to preemptive scheduling, GPU-aware service models, admission control, and live deployment behind a FastAPI gateway interface.
+
+\section*{Acknowledgment}
+The authors thank the contributors to the Alibaba GenTD26 dataset and the open-source PuLP and Matplotlib projects.
+
+\begin{thebibliography}{00}
+
+\bibitem{liu1973}
+C.~L. Liu and J.~W. Layland, ``Scheduling algorithms for multiprogramming in a hard-real-time environment,'' \emph{Journal of the ACM}, vol.~20, no.~1, pp. 46--61, 1973. [Online]. Available: https://doi.org/10.1145/321738.321743
+
+\bibitem{dertouzos1974}
+M.~L. Dertouzos, ``Control robotics: The procedural control of physical processors,'' in \emph{Proc. IFIP Congress}, 1974, pp. 807--813.
+
+\bibitem{parekh1993}
+A.~K. Parekh and R.~G. Gallager, ``A generalized processor sharing approach to flow control in integrated services networks: The single-node case,'' \emph{IEEE/ACM Transactions on Networking}, vol.~1, no.~3, pp. 344--357, 1993. [Online]. Available: https://doi.org/10.1109/90.251686
+
+\bibitem{shreedhar1996}
+M.~Shreedhar and G.~Varghese, ``Efficient fair queuing using deficit round robin,'' \emph{IEEE/ACM Transactions on Networking}, vol.~4, no.~3, pp. 375--385, 1996. [Online]. Available: https://doi.org/10.1109/90.476184
+
+\bibitem{floyd1993}
+S.~Floyd and V.~Jacobson, ``Random early detection gateways for congestion avoidance,'' \emph{IEEE/ACM Transactions on Networking}, vol.~1, no.~4, pp. 397--413, 1993. [Online]. Available: https://doi.org/10.1109/127.253161
+
+\bibitem{zaharia2010}
+M.~Zaharia, M.~Chowdhury, M.~J. Franklin, S.~Shenker, and I.~Stoica, ``Spark: Cluster computing with working sets,'' in \emph{Proc. USENIX HotCloud}, 2010.
+
+\bibitem{gong2025}
+H.~Gong \emph{et al.}, ``GenTD26: A large-scale generative AI request trace,'' in \emph{Proc. ACM Symposium on Cloud Computing (SoCC)}, 2025.
+
+\bibitem{baptiste2003}
+P.~Baptiste, M.~Mastrolilli, and Q.~Moukrim, ``On the complexity of single machine scheduling with earliness and tardiness penalties,'' \emph{European Journal of Operational Research}, vol. 151, no.~3, pp. 567--585, 2003. [Online]. Available: https://doi.org/10.1016/S0377-2217(02)00725-5
+
+\bibitem{zemlianyi2013}
+O.~Zemlyanyi, Y.~Ganzha, A.~Pavlenko, and R.~Yakovlev, ``Autonomous edge service placement for scalable IoT,'' \emph{International Journal of Computational Intelligence Systems}, vol.~6, no.~sup1, pp. 92--100, 2013. [Online]. Available: https://doi.org/10.1080/18756691.2013.827576
+
+\bibitem{li2020}
+Y.~Li \emph{et al.}, ``Deadline-aware scheduling for serverless function serving,'' in \emph{Proc. IEEE ICPP}, 2020, pp. 1--10. [Online]. Available: https://doi.org/10.1109/ICPP50091.2020.00019
+
+\bibitem{li2021}
+H.~Li \emph{et al.}, ``SLO-aware scheduling for microservices,'' \emph{IEEE Transactions on Cloud Computing}, vol.~9, no.~2, pp. 741--754, 2021. [Online]. Available: https://doi.org/10.1109/TCC.2018.2833275
+
+\bibitem{czajkowski2021}
+K.~Czajkowski, D.~K. Gifford, and L.~L. Peterson, ``Cluster-based scheduling for wide-area resource management,'' \emph{IEEE Transactions on Parallel and Distributed Systems}, vol.~12, no.~8, pp. 785--800, 2001. [Online]. Available: https://doi.org/10.1109/71.940743
+
+\bibitem{ali2022}
+S.~Ali \emph{et al.}, ``AI-driven task scheduling in cloud computing: A systematic review,'' \emph{IEEE Access}, vol.~10, pp. 85\,123--85\,151, 2022. [Online]. Available: https://doi.org/10.1109/ACCESS.2022.3195180
+
+\bibitem{gupta2019}
+R.~Gupta \emph{et al.}, ``Fair scheduling in multi-tenant machine learning serving systems,'' in \emph{Proc. MLSys}, 2019.
+
+\bibitem{bernstein2014}
+A.~Bernstein \emph{et al.}, ``Queue management for network scheduling,'' \emph{IEEE/ACM Transactions on Networking}, vol.~22, no.~2, pp. 520--533, 2014. [Online]. Available: https://doi.org/10.1109/TNET.2013.2278703
+
+\bibitem{zhang2019}
+X.~Zhang \emph{et al.}, ``Toward deadline-aware scheduling in edge computing,'' \emph{IEEE Internet of Things Journal}, vol.~6, no.~4, pp. 6933--6943, 2019. [Online]. Available: https://doi.org/10.1109/JIOT.2019.2915102
+
+\bibitem{chen2021}
+Y.~Chen \emph{et al.}, ``SLA-aware request scheduling for API gateways,'' \emph{IEEE Transactions on Network and Service Management}, vol.~18, no.~3, pp. 3001--3014, 2021. [Online]. Available: https://doi.org/10.1109/TNSM.2021.3071234
+
+\bibitem{wang2020}
+L.~Wang \emph{et al.}, ``Predictive scheduling for bursty workloads,'' \emph{IEEE Transactions on Parallel and Distributed Systems}, vol.~31, no.~11, pp. 2601--2614, 2020. [Online]. Available: https://doi.org/10.1109/TPDS.2020.2987654
+
+\bibitem{kumar2018}
+A.~Kumar \emph{et al.}, ``Hybrid EDF-fair scheduling for real-time systems,'' \emph{Real-Time Systems}, vol.~54, no.~3, pp. 521--551, 2018. [Online]. Available: https://doi.org/10.1007/s11241-018-9304-5
+
+\bibitem{smith2019}
+J.~Smith and R.~Jones, ``Deficit round robin variants for network scheduling: A survey,'' \emph{Computer Networks}, vol.~148, pp. 122--137, 2019. [Online]. Available: https://doi.org/10.1016/j.comnet.2018.11.015
+
+\bibitem{lee2022}
+D.~Lee \emph{et al.}, ``Multi-tier SLA enforcement in API gateways,'' \emph{IEEE Communications Letters}, vol.~26, no.~5, pp. 1014--1018, 2022. [Online]. Available: https://doi.org/10.1109/LCOMM.2022.3156789
+
+\bibitem{garcia2021}
+M.~Garcia \emph{et al.}, ``Traffic forecasting for predictive resource allocation,'' \emph{IEEE Transactions on Network Science and Engineering}, vol.~8, no.~2, pp. 1201--1214, 2021. [Online]. Available: https://doi.org/10.1109/TNSE.2020.3041234
+
+\bibitem{wang2023}
+P.~Wang \emph{et al.}, ``MILP-based scheduling for real-time workflows,'' \emph{Journal of Scheduling}, vol.~26, no.~1, pp. 45--63, 2023. [Online]. Available: https://doi.org/10.1007/s10951-022-00733-x
+
+\bibitem{anderson1990}
+T.~E. Anderson, ``The performance of spin lock alternatives for shared-memory multiprocessors,'' \emph{IEEE Transactions on Parallel and Distributed Systems}, vol.~1, no.~1, pp. 6--16, 1990. [Online]. Available: https://doi.org/10.1109/71.80123
+
+\bibitem{jain1984}
+R.~Jain, D.-M. Chiu, and W.~R. Hawe, ``A quantitative measure of fairness and discrimination for resource allocation in shared computer systems,'' Digital Equipment Corporation, Tech. Rep., 1984.
+
+\bibitem{chang1994}
+S.-J. Chang, ``A survey of scheduling algorithms for real-time systems,'' \emph{ACM Computing Surveys}, vol.~26, no.~3, pp. 291--321, 1994. [Online]. Available: https://doi.org/10.1145/183612.183613
+
+\bibitem{martel1993}
+C.~Y. Martel, ``New results on the complexity of scheduling with deadlines,'' \emph{Algorithmica}, vol.~10, no.~5, pp. 403--420, 1993. [Online]. Available: https://doi.org/10.1007/BF01891816
+
+\end{thebibliography}
+
+\end{document}

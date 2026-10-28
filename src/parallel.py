@@ -68,6 +68,8 @@ def schedule_parallel(
                     tier_heaps[request.tier],
                     (request.deadline, request.arrival_time, request.request_id, request),
                 )
+            else:
+                ready.append(request)
             if policy == "Predictive EDF+DRR" and model is not None:
                 bucket = int(request.arrival_time // model.window_size)
                 while last_bucket < bucket:
@@ -75,9 +77,6 @@ def schedule_parallel(
                     for tier in configured_quanta:
                         history[tier].append(0.0)
                 history[request.tier][-1] += 1.0
-            else:
-                if policy not in {"EDF+DRR", "Predictive EDF+DRR"}:
-                    ready.append(request)
             next_index += 1
 
     def choose_request() -> Request | None:
