@@ -6,11 +6,18 @@ from typing import Iterable, Mapping
 
 from .drr import DEFAULT_QUANTA
 from .models import Request, ScheduledRequest
+from .traffic_model import TrafficSpikeModel
+
+SPIKE_RATIO_THRESHOLD = 1.5
+MAX_QUANTUM_SCALE = 1.20
 
 
 def predict_traffic_and_adjust_quanta(
     pending_requests: list[Request],
     base_quanta: dict[str, float],
+    model: TrafficSpikeModel | None = None,
+    history: Mapping[str, list[float]] | None = None,
+    time_index: int = 0,
 ) -> dict[str, float]:
     """Adjust tier quanta using the service demand in the current backlog.
 
@@ -24,6 +31,22 @@ def predict_traffic_and_adjust_quanta(
     demand = defaultdict(float)
     for request in pending_requests:
         demand[request.tier] += request.service_time
+
+    if model is not None:
+        predicted = model.predict(history or {}, time_index)
+        scales: dict[str, float] = {}
+        for tier in base_quanta:
+            recent = list((history or {}).get(tier, ()))
+            baseline = sum(recent[-3:]) / max(1, min(3, len(recent)))
+            ratio = predicted.get(tier, 0.0) / max(1.0, baseline)
+            scales[tier] = min(
+                MAX_QUANTUM_SCALE,
+                1.0 + max(0.0, ratio - SPIKE_RATIO_THRESHOLD) * 0.4,
+            )
+        return {
+            tier: base_quantum * scales[tier]
+            for tier, base_quantum in base_quanta.items()
+        }
 
     total_demand = sum(demand.values())
     if total_demand == 0:
@@ -42,6 +65,7 @@ def predict_traffic_and_adjust_quanta(
 def schedule_predictive_edf_drr(
     requests: Iterable[Request],
     quanta: Mapping[str, float] | None = None,
+    model: TrafficSpikeModel | None = None,
 ) -> list[ScheduledRequest]:
     """Schedule with predictive DRR between tiers and EDF within each tier.
 
@@ -72,9 +96,11 @@ def schedule_predictive_edf_drr(
     current_time = 0.0
     next_index = 0
     cursor = 0
+    history: dict[str, list[float]] = defaultdict(list)
+    last_bucket = -1
 
     def enqueue_available() -> None:
-        nonlocal next_index
+        nonlocal last_bucket, next_index
         while (
             next_index < len(ordered)
             and ordered[next_index].arrival_time <= current_time
@@ -84,6 +110,13 @@ def schedule_predictive_edf_drr(
                 queues[request.tier],
                 (request.deadline, request.arrival_time, request.request_id, request),
             )
+            bucket = int(request.arrival_time // model.window_size) if model else 0
+            while model is not None and last_bucket < bucket:
+                last_bucket += 1
+                for tier in base_quanta:
+                    history[tier].append(0.0)
+            if model is not None:
+                history[request.tier][-1] += 1.0
             next_index += 1
 
     while next_index < len(ordered) or any(queues.values()):
@@ -97,7 +130,11 @@ def schedule_predictive_edf_drr(
             for _, _, _, request in queue
         ]
         dynamic_quanta = predict_traffic_and_adjust_quanta(
-            pending_requests, base_quanta
+            pending_requests,
+            base_quanta,
+            model=model,
+            history=history,
+            time_index=max(last_bucket, 0),
         )
 
         selected_index = next(

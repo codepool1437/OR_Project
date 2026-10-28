@@ -92,6 +92,8 @@ class Metrics:
     per_tier_completion_rate: dict[str, float]
     per_tier_backlog: dict[str, int]
     per_tier_sla_violation_rate: dict[str, float]
+    expired_requests: int = 0
+    useful_work_ratio: float = 1.0
 
     def as_dict(self) -> dict[str, float | int]:
         """Return a JSON-friendly representation of the metrics."""
@@ -109,4 +111,6 @@ class Metrics:
             "per_tier_completion_rate": self.per_tier_completion_rate,
             "per_tier_backlog": self.per_tier_backlog,
             "per_tier_sla_violation_rate": self.per_tier_sla_violation_rate,
+            "expired_requests": self.expired_requests,
+            "useful_work_ratio": self.useful_work_ratio,
         }

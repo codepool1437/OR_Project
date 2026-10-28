@@ -1,0 +1,20 @@
+{
+  "seed_count": 30,
+  "comparison": "Predictive EDF+DRR minus EDF+DRR",
+  "average_waiting_time_delta": {
+    "mean": -0.07016002048984632,
+    "95_percent_ci": [
+      -0.13649151636881435,
+      -0.0038285246108782783
+    ],
+    "wins": 23
+  },
+  "sla_violation_rate_delta": {
+    "mean": -0.005107192498862929,
+    "95_percent_ci": [
+      -0.012345346945265852,
+      0.0021309619475399933
+    ],
+    "wins": 17
+  }
+}

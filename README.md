@@ -138,6 +138,48 @@ single-worker comparison, parallel-worker comparison, capacity report, and
 MILP benchmark commands as a deterministic proxy for ML-based traffic
 adaptation; it does not change the non-preemptive service model.
 
+## Train the traffic-spike model
+
+The project includes a dependency-free lightweight ridge-regression forecaster
+that predicts next-window request demand per tier from recent bucket counts,
+trend, and cyclical time features. Train it on synthetic or GenTD26 traffic:
+
+```text
+python -m src.train_traffic_model --requests 5000 --output results/traffic_model.json
+python -m src.run_comparison --requests 1000 --traffic-model results/traffic_model.json
+```
+
+For GenTD26:
+
+```text
+python -m src.train_traffic_model --dataset data/GenTD26/lora_request_trace.csv --max-requests 10000
+python -m src.run_comparison --dataset data/GenTD26/lora_request_trace.csv --max-requests 10000 --traffic-model results/traffic_model.json
+```
+
+The model is deliberately small and serializes to JSON; no ML runtime is
+required in production. Predicted demand is combined with current backlog
+demand, and each tier retains a minimum half-quantum floor to prevent
+starvation. The model is a forecasting component, not evidence that an
+XGBoost is available as an optional paper comparator through
+`src.xgboost_model`; it is trained per tier and saved alongside metadata.
+Install dependencies from `requirements.txt` before using it.
+
+The paper evaluation must use chronological train/validation/test splits,
+report MAE/RMSE for demand forecasts, define spikes using a preceding-window
+threshold, and report precision, recall, and F1. The simulator also reports
+expired requests and useful work ratio so overload results do not hide wasted
+service.
+
+For paper evidence, run the reproducible paired multi-seed evaluation:
+
+```text
+python -m src.evaluate_research --seeds 30 --output results/research_evaluation.json
+```
+
+Report the mean and 95% confidence interval of paired deltas against static
+EDF+DRR. Do not claim a predictive improvement unless the interval excludes
+zero in the favorable direction on unseen test traffic.
+
 ## MILP theoretical benchmark
 
 Install the optimization dependency from `requirements.txt`, then run the
@@ -163,3 +205,14 @@ arrival times and single-server non-overlap. It is the theoretical reference
 for FIFO, EDF, DRR, and EDF+DRR. Because pairwise ordering variables grow
 quadratically, use it for small batches (10–50 requests), not for the full
 production trace or live scheduling.
+
+Generate a paper-ready table comparing every policy with MILP ground truth:
+
+```text
+python -m src.compare_ground_truth --requests 20 --seed 42
+```
+
+The report includes weighted tardiness, objective gap versus MILP, mean and
+P95 waiting time, SLA violation rate, useful work ratio, throughput, and
+fairness. MILP is the ground truth only for its weighted-tardiness objective;
+another policy may be better on a different operational metric.

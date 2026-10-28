@@ -106,6 +106,17 @@ def calculate_metrics(
         )
         for item in cpu_items
     )
+    completed_ids = {item.request.request_id for item in completed_items}
+    expired_requests = sum(
+        request.deadline < end_time and request.request_id not in completed_ids
+        for request in offered_requests
+    )
+    useful_work_ratio = (
+        sum(not item.sla_violated for item in completed_items)
+        / len(completed_items)
+        if completed_items
+        else 1.0
+    )
 
     offered_by_tier: dict[str, int] = defaultdict(int)
     completed_by_tier: dict[str, int] = defaultdict(int)
@@ -166,4 +177,6 @@ def calculate_metrics(
         per_tier_completion_rate=per_tier_completion_rate,
         per_tier_backlog=per_tier_backlog,
         per_tier_sla_violation_rate=per_tier_sla_violation_rate,
+        expired_requests=expired_requests,
+        useful_work_ratio=useful_work_ratio,
     )

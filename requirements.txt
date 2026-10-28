@@ -1,2 +1,6 @@
 PuLP>=2.8,<3
 matplotlib>=3.8,<4
+
+# Optional paper baseline; the core simulator does not require it.
+xgboost>=2.0,<4
+scikit-learn>=1.4,<2

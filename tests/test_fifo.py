@@ -16,6 +16,8 @@ from src.predictive_edf_drr import (
     schedule_predictive_edf_drr,
 )
 from src.traffic import generate_requests
+from src.traffic_model import TrafficSpikeModel, train_traffic_model
+from src.research_metrics import classification_metrics, regression_metrics, spike_labels
 
 
 class FifoBaselineTests(unittest.TestCase):
@@ -140,6 +142,67 @@ class FifoBaselineTests(unittest.TestCase):
         adjusted = predict_traffic_and_adjust_quanta(requests, base)
         self.assertGreater(adjusted["VIP"], adjusted["Free"])
         self.assertGreaterEqual(adjusted["Premium"], 0.5)
+
+    def test_traffic_model_trains_predicts_and_round_trips(self) -> None:
+        requests = generate_requests(count=80, seed=9, arrival_rate=4.0)
+        model = train_traffic_model(requests, window_size=1.0)
+        predictions = model.predict({"VIP": [1.0, 2.0, 4.0]}, 3)
+        self.assertEqual(set(predictions), set(model.tiers))
+        self.assertTrue(all(value >= 0.0 for value in predictions.values()))
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "traffic_model.json"
+            model.save(path)
+            loaded = TrafficSpikeModel.load(path)
+        self.assertEqual(loaded.to_dict(), model.to_dict())
+
+    def test_research_evaluation_returns_paired_statistics(self) -> None:
+        from src.evaluate_research import evaluate_schedulers
+
+        result = evaluate_schedulers(range(2), 80, 20.0, 5.0)
+        self.assertEqual(result["seed_count"], 2)
+        self.assertIn("95_percent_ci", result["average_waiting_time_delta"])
+
+    def test_research_metrics_measure_spikes_and_forecasts(self) -> None:
+        labels = spike_labels([1, 1, 1, 5, 1, 1])
+        metrics = classification_metrics(labels, labels)
+        self.assertEqual(metrics["f1"], 1.0)
+        errors = regression_metrics([1.0, 3.0], [1.0, 2.0])
+        self.assertAlmostEqual(errors["mae"], 0.5)
+
+    def test_xgboost_model_trains_and_predicts(self) -> None:
+        from src.xgboost_model import train_xgboost_model
+
+        requests = generate_requests(count=80, seed=3, arrival_rate=4.0)
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "xgb.json"
+            model = train_xgboost_model(requests, path, window_size=1.0)
+            predictions = model.predict({"VIP": [1.0, 2.0, 3.0]}, 4)
+        self.assertEqual(set(predictions), set(model.tiers))
+
+    def test_ground_truth_comparison_contains_all_policies(self) -> None:
+        from src.compare_ground_truth import compare
+
+        requests = generate_requests(count=8, seed=4, arrival_rate=5.0)
+        rows = compare(requests)
+        policies = {row["policy"] for row in rows}
+        self.assertEqual(
+            policies,
+            {
+                "FIFO",
+                "EDF",
+                "DRR",
+                "EDF+DRR",
+                "Predictive EDF+DRR",
+                "MILP (ground truth)",
+            },
+        )
+        best_objective = min(row["weighted_tardiness"] for row in rows)
+        milp_objective = next(
+            row["weighted_tardiness"]
+            for row in rows
+            if row["policy"] == "MILP (ground truth)"
+        )
+        self.assertAlmostEqual(milp_objective, best_objective)
 
     def test_gen_td26_loader_augments_request_fields(self) -> None:
         csv_text = (

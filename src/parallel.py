@@ -7,6 +7,7 @@ from typing import Iterable, Mapping
 from .drr import DEFAULT_QUANTA
 from .models import Request, ScheduledRequest
 from .predictive_edf_drr import predict_traffic_and_adjust_quanta
+from .traffic_model import TrafficSpikeModel
 
 
 def schedule_parallel(
@@ -14,6 +15,7 @@ def schedule_parallel(
     policy: str,
     workers: int,
     quanta: Mapping[str, float] | None = None,
+    model: TrafficSpikeModel | None = None,
 ) -> list[ScheduledRequest]:
     """Schedule requests on a pool of identical non-preemptive workers.
 
@@ -52,9 +54,11 @@ def schedule_parallel(
     cursor = 0
     next_index = 0
     scheduled: list[ScheduledRequest] = []
+    history: dict[str, list[float]] = defaultdict(list)
+    last_bucket = -1
 
     def add_arrivals(until: float) -> None:
-        nonlocal next_index
+        nonlocal last_bucket, next_index
         while next_index < len(ordered) and ordered[next_index].arrival_time <= until:
             request = ordered[next_index]
             if policy == "DRR":
@@ -64,8 +68,16 @@ def schedule_parallel(
                     tier_heaps[request.tier],
                     (request.deadline, request.arrival_time, request.request_id, request),
                 )
+            if policy == "Predictive EDF+DRR" and model is not None:
+                bucket = int(request.arrival_time // model.window_size)
+                while last_bucket < bucket:
+                    last_bucket += 1
+                    for tier in configured_quanta:
+                        history[tier].append(0.0)
+                history[request.tier][-1] += 1.0
             else:
-                ready.append(request)
+                if policy not in {"EDF+DRR", "Predictive EDF+DRR"}:
+                    ready.append(request)
             next_index += 1
 
     def choose_request() -> Request | None:
@@ -101,7 +113,11 @@ def schedule_parallel(
                         for _, _, _, request in queue
                     ]
                     dynamic_quanta = predict_traffic_and_adjust_quanta(
-                        pending, configured_quanta
+                        pending,
+                        configured_quanta,
+                        model=model,
+                        history=history,
+                        time_index=max(last_bucket, 0),
                     )
                     deficits[tier] += dynamic_quanta[tier]
                 else:

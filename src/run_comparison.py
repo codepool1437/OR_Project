@@ -9,6 +9,7 @@ from .edf_drr import schedule_edf_drr
 from .fifo import calculate_metrics, schedule_fifo
 from .parallel import schedule_parallel
 from .predictive_edf_drr import schedule_predictive_edf_drr
+from .traffic_model import TrafficSpikeModel
 from .gen_td26 import load_gen_td26_requests
 from .traffic import generate_requests
 
@@ -26,6 +27,12 @@ def main() -> None:
         default=None,
         help="path to GenTD26 lora_request_trace.csv; otherwise use synthetic traffic",
     )
+    parser.add_argument(
+        "--traffic-model",
+        type=str,
+        default=None,
+        help="trained traffic model JSON for Predictive EDF+DRR",
+    )
     parser.add_argument("--max-requests", type=int, default=None)
     parser.add_argument(
         "--horizon",
@@ -40,6 +47,7 @@ def main() -> None:
         help="parallel workers; values above 1 use the parallel dispatch simulator",
     )
     args = parser.parse_args()
+    traffic_model = TrafficSpikeModel.load(args.traffic_model) if args.traffic_model else None
 
     if args.dataset:
         requests = load_gen_td26_requests(
@@ -58,11 +66,15 @@ def main() -> None:
             "EDF": schedule_edf(requests),
             "DRR": schedule_drr(requests),
             "EDF+DRR": schedule_edf_drr(requests),
-            "Predictive EDF+DRR": schedule_predictive_edf_drr(requests),
+            "Predictive EDF+DRR": schedule_predictive_edf_drr(
+                requests, model=traffic_model
+            ),
         }
     else:
         schedules = {
-            policy: schedule_parallel(requests, policy, args.workers)
+            policy: schedule_parallel(
+                requests, policy, args.workers, model=traffic_model
+            )
             for policy in (
                 "FIFO",
                 "EDF",
