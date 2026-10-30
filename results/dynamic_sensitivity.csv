@@ -1,0 +1,12 @@
+parameter,value,policy,mean_tardiness_ratio_vs_edf_drr,mean_sla_rate_delta_vs_edf_drr,instances
+defer_limit_s,0.25,Dynamic EDF+DRR (deferral only),1.0757991820187687,-0.008921874999999998,64
+defer_limit_s,0.5,Dynamic EDF+DRR (deferral only),1.0986103743070674,-0.016171875,64
+defer_limit_s,1.0,Dynamic EDF+DRR (deferral only),1.1169081817253064,-0.02671875,64
+defer_limit_s,2.0,Dynamic EDF+DRR (deferral only),1.1421783164054495,-0.041953124999999994,64
+defer_limit_s,4.0,Dynamic EDF+DRR (deferral only),1.173719075278708,-0.062953125,64
+defer_limit_s,inf,Dynamic EDF+DRR (deferral only),1.3137442531083392,-0.1775625,64
+quanta_floor,0.25,Dynamic EDF+DRR,3.0825869800424157,-0.141609375,64
+quanta_floor,0.5,Dynamic EDF+DRR,2.068645648210193,-0.15707812499999999,64
+quanta_floor,0.75,Dynamic EDF+DRR,1.440718069397649,-0.17270312499999999,64
+quanta_floor,0.9,Dynamic EDF+DRR,1.3215956641473698,-0.175234375,64
+quanta_floor,1.0,Dynamic EDF+DRR,1.3137442531083392,-0.1775625,64

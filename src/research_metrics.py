@@ -1,8 +1,36 @@
 """Forecast and traffic-spike metrics used by the research evaluation."""
 
 from math import sqrt
-from statistics import mean
-from typing import Sequence
+from statistics import mean, stdev
+from typing import Iterable, Sequence
+
+# Two-sided 97.5% Student-t quantiles for small paired samples (df = n - 1).
+_T975 = {
+    1: 12.706, 2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571, 6: 2.447, 7: 2.365,
+    8: 2.306, 9: 2.262, 10: 2.228, 11: 2.201, 12: 2.179, 13: 2.160, 14: 2.145,
+    15: 2.131, 16: 2.120, 17: 2.110, 18: 2.101, 19: 2.093, 20: 2.086,
+    21: 2.080, 22: 2.074, 23: 2.069, 24: 2.064, 25: 2.060, 26: 2.056,
+    27: 2.052, 28: 2.048, 29: 2.045, 30: 2.042,
+}
+
+
+def weighted_tardiness(scheduled: Iterable) -> float:
+    """Penalty-weighted tardiness: sum of penalty * max(0, completion - deadline)."""
+    return sum(
+        item.request.sla_penalty * max(0.0, item.completion_time - item.request.deadline)
+        for item in scheduled
+    )
+
+
+def mean_ci(values: Sequence[float]) -> tuple[float, float, float]:
+    """Return (mean, ci_low, ci_high) using the Student-t 95% interval."""
+    average = mean(values)
+    if len(values) < 2:
+        return average, average, average
+    df = len(values) - 1
+    t_value = _T975.get(df, 1.96)
+    half = t_value * stdev(values) / sqrt(len(values))
+    return average, average - half, average + half
 
 
 def spike_labels(

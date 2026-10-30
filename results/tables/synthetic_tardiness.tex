@@ -1,0 +1,14 @@
+\begin{tabular}{lrrrrrrr}
+\toprule
+Scenario & FIFO & EDF & DRR & EDF+DRR & ATC & Pred. EDF+DRR & Dyn. EDF+DRR \\
+\midrule
+normal & 120 & 9 & 35 & 30 & \textbf{8} & 30 & 45 \\
+overload & 37091 & 34268 & 9736 & 9713 & \textbf{6123} & 9721 & 8817 \\
+vip\_spike & 4063 & 2747 & 1386 & 1313 & \textbf{682} & 1317 & 1497 \\
+free\_spike & 5297 & 3967 & 1675 & 1651 & \textbf{1065} & 1651 & 1627 \\
+mixed\_burst & 6128 & 4370 & 1534 & 1522 & \textbf{998} & 1527 & 1669 \\
+random\_burst & 6615 & 5198 & 1684 & 1674 & \textbf{1094} & 1669 & 1706 \\
+tight\_deadlines & 1528 & 868 & 451 & 441 & \textbf{274} & 443 & 531 \\
+relaxed\_deadlines & 10285 & 5301 & 2166 & 2104 & \textbf{1000} & 2105 & 2360 \\
+\bottomrule
+\end{tabular}

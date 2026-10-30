@@ -1,23 +1,30 @@
-"""Generate reproducible forecasting and scheduler evidence for the paper."""
+"""Paired multi-seed evaluation of predictive vs. static EDF+DRR.
+
+The traffic forecaster is trained on a held-out seed that never appears in the
+evaluation set, and confidence intervals use Student-t quantiles.
+"""
 
 import argparse
 import json
 from pathlib import Path
-from statistics import mean, stdev
 
 from .edf_drr import schedule_edf_drr
 from .fifo import calculate_metrics
 from .predictive_edf_drr import schedule_predictive_edf_drr
+from .research_metrics import mean_ci
 from .traffic import generate_requests
 from .traffic_model import train_traffic_model
 
+TRAINING_SEED = 1_000_003
 
-def _ci(values: list[float]) -> list[float]:
-    if len(values) < 2:
-        return [mean(values), mean(values)]
-    half_width = 2.262 * stdev(values) / len(values) ** 0.5
-    average = mean(values)
-    return [average - half_width, average + half_width]
+
+def _summary(deltas: list[float]) -> dict[str, object]:
+    mean, low, high = mean_ci(deltas)
+    return {
+        "mean": mean,
+        "95_percent_ci": [low, high],
+        "wins": sum(value < 0 for value in deltas),
+    }
 
 
 def evaluate_schedulers(
@@ -25,41 +32,31 @@ def evaluate_schedulers(
     request_count: int,
     arrival_rate: float,
     horizon: float,
+    window_size: float = 1.0,
 ) -> dict[str, object]:
+    training = generate_requests(
+        count=4 * request_count, seed=TRAINING_SEED, arrival_rate=arrival_rate
+    )
+    model = train_traffic_model(training, window_size=window_size)
     wait_deltas: list[float] = []
     sla_deltas: list[float] = []
     for seed in seeds:
         requests = generate_requests(
             count=request_count, seed=seed, arrival_rate=arrival_rate
         )
-        baseline = calculate_metrics(
-            requests, schedule_edf_drr(requests), horizon=horizon
-        )
-        model = train_traffic_model(requests)
+        baseline = calculate_metrics(requests, schedule_edf_drr(requests), horizon=horizon)
         predictive = calculate_metrics(
             requests,
             schedule_predictive_edf_drr(requests, model=model),
             horizon=horizon,
         )
-        wait_deltas.append(
-            predictive.average_waiting_time - baseline.average_waiting_time
-        )
-        sla_deltas.append(
-            predictive.sla_violation_rate - baseline.sla_violation_rate
-        )
+        wait_deltas.append(predictive.average_waiting_time - baseline.average_waiting_time)
+        sla_deltas.append(predictive.sla_violation_rate - baseline.sla_violation_rate)
     return {
         "seed_count": len(wait_deltas),
         "comparison": "Predictive EDF+DRR minus EDF+DRR",
-        "average_waiting_time_delta": {
-            "mean": mean(wait_deltas),
-            "95_percent_ci": _ci(wait_deltas),
-            "wins": sum(value < 0 for value in wait_deltas),
-        },
-        "sla_violation_rate_delta": {
-            "mean": mean(sla_deltas),
-            "95_percent_ci": _ci(sla_deltas),
-            "wins": sum(value < 0 for value in sla_deltas),
-        },
+        "average_waiting_time_delta": _summary(wait_deltas),
+        "sla_violation_rate_delta": _summary(sla_deltas),
     }
 
 
@@ -72,10 +69,7 @@ def main() -> None:
     parser.add_argument("--horizon", type=float, default=20.0)
     args = parser.parse_args()
     result = evaluate_schedulers(
-        range(args.seeds),
-        args.requests,
-        args.arrival_rate,
-        args.horizon,
+        range(args.seeds), args.requests, args.arrival_rate, args.horizon
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")

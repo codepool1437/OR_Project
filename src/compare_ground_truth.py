@@ -10,30 +10,28 @@ from .edf import schedule_edf
 from .edf_drr import schedule_edf_drr
 from .fifo import calculate_metrics, schedule_fifo
 from .gen_td26 import load_gen_td26_requests
-from .milp import solve_milp
+from .dynamic_edf_drr import schedule_dynamic_edf_drr
+from .milp import solve_milp_detailed
+from .parallel import schedule_parallel
 from .predictive_edf_drr import schedule_predictive_edf_drr
+from .research_metrics import weighted_tardiness
 from .traffic import generate_requests
 
 
-def weighted_tardiness(scheduled: Iterable) -> float:
-    """Return the exact MILP objective's dominant weighted tardiness term."""
-    return sum(
-        item.request.sla_penalty
-        * max(0.0, item.completion_time - item.request.deadline)
-        for item in scheduled
-    )
-
-
-def compare(requests) -> list[dict[str, object]]:
+def compare(requests, time_limit: float | None = 60.0) -> list[dict[str, object]]:
     schedules = {
         "FIFO": schedule_fifo(requests),
         "EDF": schedule_edf(requests),
         "DRR": schedule_drr(requests),
         "EDF+DRR": schedule_edf_drr(requests),
+        "ATC": schedule_parallel(requests, "ATC", 1),
         "Predictive EDF+DRR": schedule_predictive_edf_drr(requests),
-        "MILP (ground truth)": solve_milp(requests),
+        "Dynamic EDF+DRR": schedule_dynamic_edf_drr(requests),
     }
-    milp_objective = weighted_tardiness(schedules["MILP (ground truth)"])
+    incumbent = min(schedules.values(), key=weighted_tardiness)
+    milp = solve_milp_detailed(requests, 1, time_limit, incumbent)
+    schedules["MILP (ground truth)"] = milp.schedule
+    milp_objective = weighted_tardiness(milp.schedule)
     rows = []
     for policy, schedule in schedules.items():
         metrics = calculate_metrics(requests, schedule)
@@ -45,7 +43,7 @@ def compare(requests) -> list[dict[str, object]]:
                 "objective_gap": objective - milp_objective,
                 "objective_gap_percent": (
                     100.0 * (objective - milp_objective) / milp_objective
-                    if milp_objective
+                    if milp_objective > 1e-9
                     else None
                 ),
                 "average_waiting_time": metrics.average_waiting_time,
@@ -54,6 +52,7 @@ def compare(requests) -> list[dict[str, object]]:
                 "useful_work_ratio": metrics.useful_work_ratio,
                 "throughput": metrics.throughput,
                 "fairness_index": metrics.fairness_index,
+                "milp_proven_optimal": milp.proven_optimal,
             }
         )
     return rows
@@ -106,6 +105,9 @@ def main() -> None:
     parser.add_argument("--requests", type=int, default=20)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--arrival-rate", type=float, default=5.0)
+    parser.add_argument("--compression", type=float, default=1.0,
+                        help="scale arrival times (e.g. 0.12) to create congestion")
+    parser.add_argument("--time-limit", type=float, default=60.0)
     parser.add_argument("--dataset", type=Path)
     parser.add_argument("--max-requests", type=int)
     parser.add_argument("--output", type=Path, default=Path("results/ground_truth_comparison"))
@@ -115,7 +117,18 @@ def main() -> None:
         if args.dataset
         else generate_requests(args.requests, args.seed, args.arrival_rate)
     )
-    rows = compare(requests)
+    if args.compression != 1.0:
+        from dataclasses import replace
+
+        requests = [
+            replace(
+                r,
+                arrival_time=r.arrival_time * args.compression,
+                deadline=r.deadline - r.arrival_time * (1.0 - args.compression),
+            )
+            for r in requests
+        ]
+    rows = compare(requests, args.time_limit)
     write_report(rows, args.output)
     print(f"Wrote {args.output.with_suffix('.md')} and {args.output.with_suffix('.csv')}")
 

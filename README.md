@@ -10,6 +10,34 @@ evaluations.
 The frozen research question, hypotheses, assumptions, scope, and evaluation
 metrics are recorded in [`docs/research_design.md`](docs/research_design.md).
 
+## Reproduce every result in the paper
+
+```text
+python -m pip install -r requirements.txt
+python -m src.experiments synthetic --seeds 30      # 8 scenarios x 10 policy variants
+python -m src.experiments sensitivity               # Dynamic EDF+DRR tuning (disjoint seeds)
+python -m src.experiments gentd26 --jobs 8          # capacity sweep + chronological segments
+python -m src.experiments forecast                  # MAE/RMSE + spike P/R/F1
+python -m src.experiments milp --milp-seeds 8 --milp-sizes 10 14 18 --milp-machines 1 2 --milp-time-limit 30
+python -m src.make_figures                          # results/figures/*.png
+python -m src.make_tables                           # results/tables/*.tex (used by paper.tex)
+python -m unittest discover -s tests -v
+```
+
+Policies (all in one engine, `src/parallel.py`, any worker count): FIFO, EDF,
+DRR, EDF+DRR, ATC (weighted-tardiness dispatching rule), Predictive EDF+DRR
+(forecast-driven quanta), and Dynamic EDF+DRR (`src/dynamic_edf_drr.py`:
+urgency-driven quanta plus late-work deferral), with ablations
+`Dynamic EDF+DRR (aggressive quanta only)` and `(deferral only)`.
+The MILP (`src/milp.py`) supports multiple machines, warm starts, a time limit,
+and reports the dual bound and whether optimality was proven (HiGHS; CBC
+fallback). Eight synthetic scenarios live in `src/scenarios.py`.
+
+Headline findings (see `paper.tex`, generated artifacts in `results/`): Dynamic
+EDF+DRR lowers SLA-violation rate in every scenario but raises weighted
+tardiness outside overload; ATC has the lowest weighted tardiness; the
+forecast-driven variant gives no significant benefit over static EDF+DRR.
+
 ## Run the baseline
 
 From the repository root:

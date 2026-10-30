@@ -192,7 +192,9 @@ class FifoBaselineTests(unittest.TestCase):
                 "EDF",
                 "DRR",
                 "EDF+DRR",
+                "ATC",
                 "Predictive EDF+DRR",
+                "Dynamic EDF+DRR",
                 "MILP (ground truth)",
             },
         )

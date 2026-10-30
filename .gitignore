@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+.kilo/
+results/forecast/
+results/traffic_*.json

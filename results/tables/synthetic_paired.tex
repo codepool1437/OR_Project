@@ -1,0 +1,22 @@
+\begin{tabular}{llrrrr}
+\toprule
+Scenario & Policy & $\Delta$SLA rate & Verdict & $\Delta$W.\ tardiness & Verdict \\
+\midrule
+normal & Pred. EDF+DRR & -0.000 & n.s. & +0.3 & n.s. \\
+normal & Dyn. EDF+DRR & -0.003 & better & +14.7 & worse \\
+overload & Pred. EDF+DRR & +0.003 & worse & +7.3 & n.s. \\
+overload & Dyn. EDF+DRR & -0.381 & better & -896.4 & better \\
+vip\_spike & Pred. EDF+DRR & +0.002 & worse & +4.0 & n.s. \\
+vip\_spike & Dyn. EDF+DRR & -0.126 & better & +184.1 & worse \\
+free\_spike & Pred. EDF+DRR & -0.000 & n.s. & +0.2 & n.s. \\
+free\_spike & Dyn. EDF+DRR & -0.271 & better & -24.4 & n.s. \\
+mixed\_burst & Pred. EDF+DRR & -0.000 & n.s. & +4.9 & n.s. \\
+mixed\_burst & Dyn. EDF+DRR & -0.176 & better & +147.0 & worse \\
+random\_burst & Pred. EDF+DRR & -0.001 & n.s. & -4.7 & n.s. \\
+random\_burst & Dyn. EDF+DRR & -0.145 & better & +31.8 & n.s. \\
+tight\_deadlines & Pred. EDF+DRR & +0.000 & n.s. & +1.3 & n.s. \\
+tight\_deadlines & Dyn. EDF+DRR & -0.133 & better & +89.7 & worse \\
+relaxed\_deadlines & Pred. EDF+DRR & +0.000 & n.s. & +0.6 & n.s. \\
+relaxed\_deadlines & Dyn. EDF+DRR & -0.238 & better & +255.4 & worse \\
+\bottomrule
+\end{tabular}
